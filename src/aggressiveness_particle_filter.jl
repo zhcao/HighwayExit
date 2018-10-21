@@ -1,3 +1,4 @@
+
 type AggressivenessBelief <: BehaviorBelief
     gen::CorrelatedIDMMOBIL
     physical::MLPhysicalState
@@ -7,14 +8,16 @@ end
 
 function rand(rng::AbstractRNG,
                  b::AggressivenessBelief,
-                 s::MLState=MLState(b.physical, Array(CarState, length(b.physical.cars))))
+                # s::MLState=MLState(b.physical, Array(CarState, length(b.physical.cars))))
+                 s::MLState=MLState(b.physical, Array{CarState}(length(b.physical.cars))))
     return rand(rng, b, zeros(length(b.physical.cars)), s)
 end
 
 function rand(rng::AbstractRNG,
                 b::AggressivenessBelief,
                 sample_noises::Vector{Float64},
-                s::MLState=MLState(b.physical, Array(CarState, length(b.physical.cars))))
+                s::MLState=MLState(b.physical, Array{CarState}(length(b.physical.cars))))
+                #s::MLState=MLState(b.physical, Array(CarState, length(b.physical.cars))))
 
     s.x = b.physical.x
     s.t = b.physical.t
@@ -31,7 +34,8 @@ end
 # action(p::Policy, b::AggressivenessBelief) = action(p, b.physical)
 
 function most_likely_state(b::AggressivenessBelief)
-    s = MLState(b.physical, Array(CarState, length(b.physical.cars)))
+    #s = MLState(b.physical, Array(CarState, length(b.physical.cars)))
+    s = MLState(b.physical, Array{CarState}(length(b.physical.cars)))
     for i in 1:length(s.cars)
         ml_ind = indmax(b.weights[i])
         behavior = create_model(b.gen, b.particles[i][ml_ind])
@@ -42,7 +46,8 @@ end
 agg_means(b::AggressivenessBelief) = [mean(b.particles[i], WeightVec(b.weights[i])) for i in 1:length(b.particles)]
 function agg_stds(b::AggressivenessBelief)
     means = agg_means(b)
-    stds = Array(Float64, length(b.physical.cars))
+    #stds = Array(Float64, length(b.physical.cars))
+    stds = Array{Float64}(length(b.physical.cars))
     for i in 1:length(b.physical.cars)
         stds[i] = sqrt(sum(b.weights[i].*(b.particles[i]-means[i]).^2)/sum(b.weights[i]))
     end
@@ -61,18 +66,21 @@ function weights_from_particles!(b::AggressivenessBelief,
     resize!(b.particles, length(o.cars))
     for i in 1:length(o.cars)
         # make sure we're not going to be allocating a bunch of memory in the loop
-        if isdefined(b.particles, i)
+        #if isdefined(b.particles, i)
+        if isassigned(b.particles, i)
             sizehint!(b.particles[i], length(particles))
             resize!(b.particles[i], 0)
         else
-            b.particles[i] = Array(Float64, length(particles))
+            #b.particles[i] = Array(Float64, length(particles))
+            b.particles[i] = Array{Float64}(length(particles))
             resize!(b.particles[i], 0)
         end
-        if isdefined(b.weights, i)
+        if isassigned(b.weights, i)
             sizehint!(b.weights[i], length(particles))
             resize!(b.weights[i], 0)
         else
-            b.weights[i] = Array(Float64, length(particles))
+            #b.weights[i] = Array(Float64, length(particles))
+            b.weights[i] = Array{Float64}(length(particles))
             resize!(b.weights[i], 0)
         end
     end
@@ -101,21 +109,21 @@ function weights_from_particles!(b::AggressivenessBelief,
                 isp += 1
             elseif co.id < csp.id
                 io += 1
-            else 
+            else
                 @assert co.id > csp.id
                 isp += 1
             end
         end
     end
-   
+
     return b
 end
 
-type AggressivenessUpdater <: Updater{AggressivenessBelief}
+mutable struct AggressivenessUpdater <: Updater #{AggressivenessBelief}
     problem::Nullable{NoCrashProblem}
     nb_sims::Int
     p_resample_noise::Float64
-    resample_noise_factor::Float64 
+    resample_noise_factor::Float64
     params::WeightUpdateParams
     rng::AbstractRNG
 end
@@ -132,20 +140,26 @@ function update(up::AggressivenessUpdater,
                 o::MLPhysicalState,
                 b_new::AggressivenessBelief=AggressivenessBelief(CorrelatedIDMMOBIL(
                                                     get(up.problem).dmodel.behaviors), o,
-                                                    Array(Vector{Float64}, length(o.cars)),
-                                                    Array(Vector{Float64}, length(o.cars))))
+                                                    Array{Vector{Float64}}(length(o.cars)),
+                                                    Array{Vector{Float64}}(length(o.cars))))
+                                                    #Array(Vector{Float64}, length(o.cars)),
+                                                    #Array(Vector{Float64}, length(o.cars))))
 
-    particles = Array(MLState, up.nb_sims)
+    #particles = Array(MLState, up.nb_sims)
+    particles = Array{MLState}(up.nb_sims)
     stds = max(agg_stds(b_old), 0.01)
     for i in 1:up.nb_sims
+        #=
         if rand(up.rng) < up.p_resample_noise
             s = rand(up.rng, b_old, up.resample_noise_factor*stds)
         else
             s = rand(up.rng, b_old)
         end
+        =#
+        s = rand(up.rng, b_old)
         particles[i] = generate_s(get(up.problem), s, a, up.rng)
     end
-    
+
     weights_from_particles!(b_new, get(up.problem), o, particles, up.params)
 
     for i in 1:length(o.cars)
@@ -162,10 +176,13 @@ end
 function initialize_belief(up::AggressivenessUpdater, distribution)
     gen = CorrelatedIDMMOBIL(get(up.problem).dmodel.behaviors)
     states = [rand(up.rng, distribution) for i in 1:up.nb_sims]
-    particles = Array(Array{Float64}, length(first(states).cars))
-    weights = Array(Array{Float64}, length(first(states).cars))
+    #particles = Array(Array{Float64}, length(first(states).cars))
+    particles = Array{Array{Float64}}(length(first(states).cars))
+    #weights = Array(Array{Float64}, length(first(states).cars))
+    weights = Array{Array{Float64}}(length(first(states).cars))#
     for i in 1:length(first(states).cars)
-        particles[i] = Array(Float64, length(states))
+        #particles[i] = Array(Float64, length(states))
+        particles[i] = Array{Float64}(length(states))
         weights[i] = ones(length(states))
         for (j,s) in enumerate(states)
             particles[i][j] = aggressiveness(gen, s.cars[i].behavior)

@@ -14,7 +14,7 @@ function RobustMCTS.next_model(gen::RandomModelGenerator, rmdp::RobustNoCrashMDP
 end
 =#
 
-abstract EmbeddedBehaviorMDP <: MDP{MLPhysicalState, MLAction}
+abstract type EmbeddedBehaviorMDP <: MDP{MLPhysicalState, MLAction} end
 
 actions(p::EmbeddedBehaviorMDP) = actions(p.base)
 actions(p::EmbeddedBehaviorMDP, s::MLPhysicalState, as::NoCrashActionSpace) = actions(p.base, s, as)
@@ -23,14 +23,31 @@ create_state(p::EmbeddedBehaviorMDP) = MLPhysicalState(false, 0.0, 0.0, [])
 discount(p::EmbeddedBehaviorMDP) = discount(p.base)
 # reward(p::EmbeddedBehaviorMDP, s::MLPhysicalState, a::MLAction, sp::MLPhysicalState)
 
-type FixedBehaviorNoCrashMDP <: EmbeddedBehaviorMDP
+struct FixedBehaviorNoCrashMDP <: EmbeddedBehaviorMDP
     behaviors::Dict{Int,Nullable{BehaviorModel}}
     base::MLMDP
 end
 
+import POMDPs.generate_s
+import POMDPs.generate_sr
+
+function generate_sr(mdp::MDP, s::MLState, a::MLAction, rng::AbstractRNG, sp::MLState=create_state(mdp))
+    full_s = MLState(s, Array{CarState}(length(s.cars)))
+    for i in 1:length(s.cars)
+        full_s.cars[i] = CarState(CarPhysicalState(s.cars[i]), rand(rng, mdp.dmodel.behaviors))
+    end
+
+    full_sp = generate_s(mdp, full_s, a, rng)
+    return full_sp, reward(mdp, full_s, a, full_sp)
+end
+
+
+
 function generate_sr(mdp::FixedBehaviorNoCrashMDP, s::MLPhysicalState, a::MLAction, rng::AbstractRNG, sp::MLPhysicalState=create_state(mdp))
+    print("111")
+#=
     full_s = MLState(s, Array(CarState, length(s.cars)))
-    for (i,c) in enumerate(s.cars) 
+    for (i,c) in enumerate(s.cars)
         full_s.cars[i] = CarState(c, mdp.behaviors[c.id])
     end
     full_sp = generate_s(mdp.base, full_s, a, rng)
@@ -40,19 +57,24 @@ function generate_sr(mdp::FixedBehaviorNoCrashMDP, s::MLPhysicalState, a::MLActi
         end
     end
     return MLPhysicalState(full_sp), reward(mdp.base, full_s, a, full_sp)
+
+=#
 end
 
-type StochasticBehaviorNoCrashMDP <: EmbeddedBehaviorMDP
+struct StochasticBehaviorNoCrashMDP <: EmbeddedBehaviorMDP
     base::MLMDP
 end
 
 function generate_sr(mdp::StochasticBehaviorNoCrashMDP, s::MLPhysicalState, a::MLAction, rng::AbstractRNG, sp::MLPhysicalState=create_state(mdp))
+    print("222")
+#=
     full_s = MLState(s, Array(CarState, length(s.cars)))
-    for i in 1:length(s.cars) 
+    for i in 1:length(s.cars)
         full_s.cars[i] = CarState(s.cars[i], rand(rng, mdp.base.dmodel.behaviors))
     end
     full_sp = generate_s(mdp.base, full_s, a, rng)
     return MLPhysicalState(full_sp), reward(mdp.base, full_s, a, full_sp)
+=#
 end
 
 function initial_state(mdp::Union{FixedBehaviorNoCrashMDP,StochasticBehaviorNoCrashMDP}, rng::AbstractRNG, s=nothing)

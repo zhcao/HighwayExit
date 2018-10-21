@@ -1,8 +1,9 @@
-abstract BehaviorGenerator
+abstract type BehaviorGenerator end
 
-type DiscreteBehaviorSet <: BehaviorGenerator
+
+struct DiscreteBehaviorSet <: BehaviorGenerator
     models::Vector{BehaviorModel}
-    weights::WeightVec
+    weights::Weights
 end
 
 rand(rng::AbstractRNG, s::DiscreteBehaviorSet) = sample(rng, s.models, s.weights)
@@ -14,7 +15,7 @@ function max_accel(gen::DiscreteBehaviorSet)
     return maximum(max_accel(m[i]) for i in 1:len if w[i] > 0.0)
 end
 
-type UniformIDMMOBIL <: BehaviorGenerator
+mutable struct UniformIDMMOBIL <: BehaviorGenerator
     min_idm::IDMParam
     max_idm::IDMParam
     min_mobil::MOBILParam
@@ -52,11 +53,16 @@ N   T   A
 function standard_uniform(factor=1.0; correlation::Union{Bool,Float64}=false)
     ma = 1.4;    da = 0.6
     mb = 2.0;    db = 1.0
-    mT = 1.5;    dT = 0.5
-    mv0 = 33.3;  dv0 = 5.63
-    ms0 = 2.0;   ds0 = 2.0
+    #mT = 1.5;    dT = 0.5
+    #mT = 0.6;    dT = 0.2 ####paper1
+    mT = 0.4;    dT = 0.1
+    #mv0 = 33.3;  dv0 = 5.63
+    mv0 = 20;  dv0 = 5.63
+    #ms0 = 2.0;   ds0 = 2.0
+    ms0 = 0.3;   ds0 = 0.1
     del = 4.0
-    mp = 0.5;    dp = 0.5
+    #mp = 0.5;    dp = 0.5
+    mp = 0.2;    dp = 0.1
     mbsafe = 2.0;dbsafe = 1.0
     mathr = 0.1; dathr = 0.1
     max_idm = IDMParam(
@@ -117,7 +123,7 @@ function clip(b::IDMMOBILBehavior, gen::UniformIDMMOBIL)
     )
 end
 
-type CorrelatedIDMMOBIL <: BehaviorGenerator
+mutable struct CorrelatedIDMMOBIL <: BehaviorGenerator
     min_idm::IDMParam
     max_idm::IDMParam
     min_mobil::MOBILParam
@@ -152,7 +158,7 @@ function aggressiveness(gen::CorrelatedIDMMOBIL, b::IDMMOBILBehavior)
     return (b.p_idm.v0 - gen.min_idm.v0)/(gen.max_idm.v0 - gen.min_idm.v0)
 end
 
-type CopulaIDMMOBIL <: BehaviorGenerator
+mutable struct CopulaIDMMOBIL <: BehaviorGenerator
     min_idm::IDMParam
     max_idm::IDMParam
     min_mobil::MOBILParam

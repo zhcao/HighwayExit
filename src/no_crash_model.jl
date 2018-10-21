@@ -1,16 +1,43 @@
-type NoCrashRewardModel <: AbstractMLRewardModel
+mutable struct NoCrashRewardModel <: AbstractMLRewardModel
     cost_dangerous_brake::Float64 # POSITIVE NUMBER
     reward_in_target_lane::Float64 # POSITIVE NUMBER
 
     brake_penalty_thresh::Float64 # (POSITIVE NUMBER) if the deceleration is greater than this cost_dangerous_brake will be accured
     target_lane::Int
+
+#####################
+    reward_in_first_lane::Float64 # POSITIVE NUMBER
+    first_lane::Int
+    target_point::Float64
+    reward_for_control::Float64
+    reward_for_collision::Float64
+end
+
+mutable struct EmergencyRewardModel <: AbstractMLRewardModel
+
+    reward_for_control::Float64
+    reward_for_collision::Float64
+end
+
+
+mutable struct RampRewardModel <: AbstractMLRewardModel
+    cost_dangerous_brake::Float64 # POSITIVE NUMBER
+    #reward_in_target_lane::Float64 # POSITIVE NUMBER
+    reward_in_first_lane::Float64  # POSITIVE NUMBER
+    reward_not_finish::Float64   # NEGATIVE NUMBER
+    brake_penalty_thresh::Float64 # (POSITIVE NUMBER) if the deceleration is greater than this cost_dangerous_brake will be accured
+    target_lane::Int
+    first_lane::Int
 end
 
 #XXX temporary
-NoCrashRewardModel() = NoCrashRewardModel(100.,10.,2.5,4)
+#NoCrashRewardModel() = NoCrashRewardModel(100.,10.,2.5,4)
+NoCrashRewardModel() = NoCrashRewardModel(100.,10.,2.5,4,1.,1,2500,10,100)
 lambda(rm::NoCrashRewardModel) = rm.cost_dangerous_brake/rm.reward_in_target_lane
 
-type NoCrashIDMMOBILModel <: AbstractMLDynamicsModel
+RampRewardModel() = RampRewardModel(100.,10.,-10000.,2.5,4,1)
+
+mutable struct NoCrashIDMMOBILModel <: AbstractMLDynamicsModel
     nb_cars::Int
     phys_param::PhysicalParam
 
@@ -42,7 +69,7 @@ function NoCrashIDMMOBILModel(nb_cars::Int,
                               behaviors=DiscreteBehaviorSet(IDMMOBILBehavior[IDMMOBILBehavior(x[1],x[2],x[3],idx) for (idx,x) in
                                                  enumerate(Iterators.product(["cautious","normal","aggressive"],
                                                         [pp.v_slow+0.5;pp.v_med;pp.v_fast],
-                                                        [pp.l_car]))], WeightVec(ones(9)))
+                                                        [pp.l_car]))], Weights(ones(9)))
                               )
 
     return NoCrashIDMMOBILModel(
@@ -60,13 +87,15 @@ function NoCrashIDMMOBILModel(nb_cars::Int,
     )
 end
 
-typealias NoCrashMDP{R<:AbstractMLRewardModel} MLMDP{MLState, MLAction, NoCrashIDMMOBILModel, R}
-typealias NoCrashPOMDP{R<:AbstractMLRewardModel} MLPOMDP{MLState, MLAction, MLObs, NoCrashIDMMOBILModel, R}
-typealias SuccessMDP NoCrashMDP{TargetLaneReward}
-typealias SuccessPOMDP NoCrashPOMDP{TargetLaneReward}
+const NoCrashMDP{R<:AbstractMLRewardModel} = MLMDP{MLState, MLAction, NoCrashIDMMOBILModel, R}
+const NoCrashPOMDP{R<:AbstractMLRewardModel} = MLPOMDP{MLState, MLAction, MLObs, NoCrashIDMMOBILModel, R}
+const SuccessMDP = NoCrashMDP{TargetLaneReward}
+const SuccessPOMDP = NoCrashPOMDP{TargetLaneReward}
+const RampMDP = NoCrashMDP{RampRewardModel}
+const RampPOMDP = NoCrashPOMDP{RampRewardModel}
 
-typealias NoCrashProblem{R<:AbstractMLRewardModel} Union{NoCrashMDP{R}, NoCrashPOMDP{R}}
-typealias SuccessProblem Union{SuccessMDP, SuccessPOMDP}
+const NoCrashProblem{R<:AbstractMLRewardModel} = Union{NoCrashMDP{R}, NoCrashPOMDP{R}}
+const SuccessProblem = Union{SuccessMDP, SuccessPOMDP}
 
 # TODO issue here VVV need a different way to create observation
 create_action(::NoCrashProblem) = MLAction()
@@ -76,6 +105,7 @@ immutable NoCrashActionSpace
     NORMAL_ACTIONS::Vector{MLAction} # all the actions except brake
     acceptable::IntSet
     brake::MLAction # this action will be EITHER braking at half the dangerous brake threshold OR the braking necessary to prevent a collision at all time in the future
+    ca::MLAction #control_action
 end
 # TODO for performance, make this a macro?
 const NB_NORMAL_ACTIONS = 9
@@ -84,7 +114,7 @@ function NoCrashActionSpace(mdp::NoCrashProblem)
     accels = (-mdp.dmodel.adjustment_acceleration, 0.0, mdp.dmodel.adjustment_acceleration)
     lane_changes = (-mdp.dmodel.lane_change_rate, 0.0, mdp.dmodel.lane_change_rate)
     NORMAL_ACTIONS = MLAction[MLAction(a,l) for (a,l) in Iterators.product(accels, lane_changes)] # this should be in the problem
-    return NoCrashActionSpace(NORMAL_ACTIONS, IntSet(), MLAction()) # note: brake will be calculated later based on the state
+    return NoCrashActionSpace(NORMAL_ACTIONS, IntSet(), MLAction(), MLAction()) # note: brake will be calculated later based on the state
 end
 
 function actions(mdp::NoCrashProblem)
@@ -102,35 +132,49 @@ function actions(mdp::NoCrashProblem, s::Union{MLState, MLPhysicalState}, as::No
         if ego_y == 1. && a.lane_change < 0. || ego_y == mdp.dmodel.phys_param.nb_lanes && a.lane_change > 0.0
             continue
         end
-        # prevent running into the person in front or to the side
-        if is_safe(mdp, s, as.NORMAL_ACTIONS[i])
-            push!(acceptable, i)
+        if a.lane_change == 0.0
+            continue
         end
+        # prevent running into the person in front or to the side
+        #if is_safe(mdp, s, as.NORMAL_ACTIONS[i])
+        #    push!(acceptable, i)
+        #end
+
+        ###### for Emergency
+        push!(acceptable, i)
     end
-    brake_acc = calc_brake_acc(mdp, s)
-    brake = MLAction(brake_acc, 0)
-    return NoCrashActionSpace(as.NORMAL_ACTIONS, acceptable, brake)
+    #brake_acc = calc_brake_acc(mdp, s)
+    #brake = MLAction(brake_acc, 0)
+    brake = MLAction(-4, 0.0)
+    ca = control_action_emergency(mdp,s,false)
+
+    #ca = MLAction(ca, 0.0)  ####################
+    return NoCrashActionSpace(as.NORMAL_ACTIONS, acceptable, brake, ca)
 end
 
 calc_brake_acc(mdp::NoCrashProblem{NoCrashRewardModel}, s::Union{MLState, MLPhysicalState}) = min(max_safe_acc(mdp,s), -mdp.rmodel.brake_penalty_thresh/2.0)
 calc_brake_acc(mdp::NoCrashProblem{TargetLaneReward}, s::Union{MLState, MLPhysicalState}) = min(max_safe_acc(mdp, s), min(-mdp.dmodel.phys_param.brake_limit/2, -mdp.dmodel.brake_terminate_thresh/2))
+calc_brake_acc(mdp::NoCrashProblem{RampRewardModel}, s::Union{MLState, MLPhysicalState}) = min(max_safe_acc(mdp,s), -mdp.rmodel.brake_penalty_thresh/2.0)
 
 iterator(as::NoCrashActionSpace) = as
 Base.start(as::NoCrashActionSpace) = 1
 function Base.next(as::NoCrashActionSpace, state::Integer)
     while !(state in as.acceptable)
-        if state > NB_NORMAL_ACTIONS
+        if state == NB_NORMAL_ACTIONS+1
             return (as.brake, state+1)
+        end
+        if state > NB_NORMAL_ACTIONS+1
+            return (as.ca, state+1)
         end
         state += 1
     end
     return (as.NORMAL_ACTIONS[state], state+1)
 end
-Base.done(as::NoCrashActionSpace, state::Integer) = state > NB_NORMAL_ACTIONS+1
-Base.length(as::NoCrashActionSpace) = length(as.acceptable) + 1
+Base.done(as::NoCrashActionSpace, state::Integer) = state > NB_NORMAL_ACTIONS+2
+Base.length(as::NoCrashActionSpace) = length(as.acceptable) + 2
 
 function rand(rng::AbstractRNG, as::NoCrashActionSpace, a::MLAction=MLAction())
-    nb_acts = length(as.acceptable)+1
+    nb_acts = length(as.acceptable)+2
     index = rand(rng,1:nb_acts)
     for (i,a) in enumerate(as) # is this efficient at all ?
         if i == index
@@ -184,6 +228,13 @@ function max_safe_acc(gap, v_behind, v_ahead, braking_limit, dt)
     # VVV see mathematica notebook
     # return - (bp*dt + 2.*v - sqrt(8.*g*bp + bp^2*dt^2 - 4.*bp*dt*v + 4.*vo^2)) / (2.*dt)
     ret = 0.0
+#########################
+
+    t = vo/bp
+    ret = (g+vo*t-bp*t*t/2+bp*(t-dt)*(t-dt)/2-v*dt-v*(t-dt)) / (dt*dt/2+(t-dt)*dt)
+    return ret
+###########################
+#=
     try
         ret = - (bp*dt + 2.*v - sqrt(8.*g*bp + bp^2*dt^2 - 4.*bp*dt*v + 4.*vo^2)) / (2.*dt)
     catch ex
@@ -195,6 +246,7 @@ function max_safe_acc(gap, v_behind, v_ahead, braking_limit, dt)
         rethrow(ex)
     end
     return ret
+=#
 end
 
 """
@@ -206,7 +258,8 @@ function nullable_max_safe_acc(gap, v_behind, v_ahead, braking_limit, dt)
     vo = v_ahead
     g = gap
     # VVV see mathematica notebook
-    discriminant = 8.*g*bp + bp^2*dt^2 - 4.*bp*dt*v + 4.*vo^2
+    #discriminant = 8.*g*bp + bp^2*dt^2 - 4.*bp*dt*v + 4.*vo^2
+    discriminant = 8.*g*bp + bp^2*dt^2 - 2.*bp*dt*v + 4.*vo^2
     if discriminant >= 0.0
         return Nullable{Float64}(- (bp*dt + 2.*v - sqrt(discriminant)) / (2.*dt))
     else
@@ -214,7 +267,178 @@ function nullable_max_safe_acc(gap, v_behind, v_ahead, braking_limit, dt)
     end
 end
 
+"""
+Return get a PID acc for lane change
+"""
+function get_PID_acc(mdp::NoCrashProblem, s::Union{MLState,MLObs})
+    dt = mdp.dmodel.phys_param.dt
+    v_min = mdp.dmodel.phys_param.v_min
+    l_car = mdp.dmodel.phys_param.l_car
+    bp = mdp.dmodel.phys_param.brake_limit
+    ego = s.cars[1]
 
+
+    pp = mdp.dmodel.phys_param
+    neighborhood = get_neighborhood(pp, s, 1)
+
+
+    car_in_front = neighborhood[2]
+    if car_in_front == 0
+        return 9999
+    else
+        smallest_gap = s.cars[car_in_front].x - ego.x - l_car
+        de_acc = Gipps_acc(smallest_gap, ego.vel, s.cars[car_in_front].vel, bp, dt)
+        RSS_acc = RSS_dis_acc(smallest_gap, ego.vel, s.cars[car_in_front].vel, bp, dt)
+        if RSS_acc < de_acc
+            de_acc = RSS_acc
+        end
+        #ttc = 4
+        #desired_dis = ttc*(ego.vel-s.cars[car_in_front].vel)
+        #desired_dis = 5+ego.vel*0.5
+        return de_acc
+        #=
+        if smallest_gap > desired_dis
+            return 9999
+        else
+            return -0.1*(desired_dis-smallest_gap)
+        end
+        =#
+    end
+end
+
+
+
+
+function get_PID_lane_change_acc(mdp::NoCrashProblem, s::Union{MLState,MLObs})
+    dt = mdp.dmodel.phys_param.dt
+    v_min = mdp.dmodel.phys_param.v_min
+    l_car = mdp.dmodel.phys_param.l_car
+    bp = mdp.dmodel.phys_param.brake_limit
+    ego = s.cars[1]
+
+    pp = mdp.dmodel.phys_param
+    neighborhood = get_neighborhood(pp, s, 1)
+
+
+    car_in_front = neighborhood[1]
+    if car_in_front == 0
+        return 1.5
+    else
+        smallest_gap = s.cars[car_in_front].x - ego.x - l_car
+        de_acc = desired_safe_dis(smallest_gap, ego.vel, s.cars[car_in_front].vel, bp, dt)
+        return de_acc
+    end
+end
+
+
+
+function desired_safe_dis(gap, v_behind, v_ahead, braking_limit, dt)
+    bp = braking_limit
+    v = v_behind
+    vo = v_ahead
+    g = gap
+    # VVV see mathematica notebook
+    p = 0.1
+    g1 = ((2*v+bp*dt)^2-bp^2*dt+2*v*bp*dt-4*vo^2)/(8*bp)
+    return p*(g-g1)
+end
+
+function Human_like_acc(gap, v_behind, v_ahead, braking_limit, dt)
+    bp = -braking_limit
+    br = bp/4
+    bf = bp/2
+    v = v_behind
+    vo = v_ahead
+    g = gap
+    g1 = v_behind*1.8
+    if g>g1
+        g_acc = 9999
+    else
+        g_acc = 0.1*(g-g1)
+    end
+
+    if g_acc<-1.5
+        g_acc = -1.5
+    end
+    return g_acc
+end
+
+function AEB_acc(gap, v_behind, v_ahead, braking_limit, dt)
+    bp = braking_limit
+    v = v_behind
+    vo = v_ahead
+    g = gap
+    # VVV see mathematica notebook
+    p = 0.1
+    #g1 = ((2*v+bp*dt)^2-bp^2*dt+2*v*bp*dt-4*vo^2)/(8*bp)
+    #g_RSS = v*dt+1/2*1*dt^2+(v+dt*1)^2/2/bp-vo^2/2/bp
+    g_AEB = v_behind*0.9
+    if g<g_AEB
+        return -4
+    else
+        return 9999
+    end
+end
+
+function Gipps_acc(gap, v_behind, v_ahead, braking_limit, dt)
+    bp = -braking_limit
+    br = bp/4
+    bf = bp/2
+    v = v_behind
+    vo = v_ahead
+    g = gap
+    # VVV see mathematica notebook
+    #p = 0.1
+    #g1 = ((2*v+bp*dt)^2-bp^2*dt+2*v*bp*dt-4*vo^2)/(8*bp)
+    m = br^2*dt^2-br*(2*gap-v*dt-vo^2/bf)
+    if m > 0
+        v_d = br*dt + sqrt(m)
+        g_acc = (v_d-v)/dt
+    else
+        g_acc = -1.5
+    end
+    if g_acc<-1.5
+        g_acc = -1.5
+    end
+    return g_acc
+end
+
+function RSS_dis_acc(gap, v_behind, v_ahead, braking_limit, dt)
+    bp = braking_limit
+    v = v_behind
+    vo = v_ahead
+    g = gap
+    # VVV see mathematica notebook
+    p = 0.1
+    #g1 = ((2*v+bp*dt)^2-bp^2*dt+2*v*bp*dt-4*vo^2)/(8*bp)
+    g_RSS = v*dt+1/2*1*dt^2+(v+dt*1)^2/2/bp-vo^2/2/bp
+    if g<g_RSS
+        return -4
+    else
+        return 9999
+    end
+end
+
+function Detect_RSS_Braking(mdp::NoCrashProblem, s::Union{MLState,MLObs})
+    dt = mdp.dmodel.phys_param.dt
+    v_min = mdp.dmodel.phys_param.v_min
+    l_car = mdp.dmodel.phys_param.l_car
+    bp = mdp.dmodel.phys_param.brake_limit
+    ego = s.cars[1]
+
+    pp = mdp.dmodel.phys_param
+    neighborhood = get_neighborhood(pp, s, 1)
+
+    car_in_front = neighborhood[2]
+    if car_in_front > 0
+        smallest_gap = s.cars[car_in_front].x - ego.x - l_car
+        RSS_acc = RSS_dis_acc(smallest_gap, ego.vel, s.cars[car_in_front].vel, bp, dt)
+        if RSS_acc <-2.3
+            return true
+        end
+    end
+    return false
+end
 
 """
 Test whether, if the ego vehicle takes action a, it will always be able to slow down fast enough if the car in front slams on his brakes and won't pull in front of another car so close they can't stop
@@ -224,6 +448,22 @@ function is_safe(mdp::NoCrashProblem, s::Union{MLState,MLObs}, a::MLAction)
     if a.acc >= max_safe_acc(mdp, s, a.lane_change)
         return false
     end
+    ############## check whether the lane change action is reasonable!
+    if a.lane_change > 0.3
+        return false
+    end
+    vel = s.cars[1].vel
+    if vel>34 && a.acc>0
+        return false
+    end
+    if s.x < 1500 && a.lane_change!=0.0 && isinteger(s.cars[1].y)
+        return false
+    end
+
+    if s.x > 2500 && a.lane_change!=0.0 && isinteger(s.cars[1].y)
+        return false
+    end
+
     # check whether we will go into anyone else's lane so close that they might hit us or we might run into them
     if isinteger(s.cars[1].y) && a.lane_change != 0.0
         l_car = mdp.dmodel.phys_param.l_car
@@ -252,7 +492,8 @@ function is_safe(mdp::NoCrashProblem, s::Union{MLState,MLObs}, a::MLAction)
 end
 
 #XXX temp
-create_state(p::NoCrashProblem) = MLState(0.0, 0.0, Array(CarState, p.dmodel.nb_cars), nothing)
+#create_state(p::NoCrashProblem) = MLState(0.0, 0.0, Array(CarState, p.dmodel.nb_cars), nothing)
+create_state(p::NoCrashProblem) = MLState(0.0, 0.0, Array{CarState}(p.dmodel.nb_cars), true, nothing)
 create_observation(pomdp::Union{NoCrashPOMDP,SuccessPOMDP}) = MLObs(0.0, 0.0, Array(CarStateObs, pomdp.dmodel.nb_cars), nothing)
 
 function generate_s(mdp::NoCrashProblem, s::MLState, a::MLAction, rng::AbstractRNG)
@@ -260,20 +501,22 @@ function generate_s(mdp::NoCrashProblem, s::MLState, a::MLAction, rng::AbstractR
     @if_debug dbg_rng = copy(rng)
 
     sp::MLState=create_state(mdp)
-
     pp = mdp.dmodel.phys_param
     dt = pp.dt
     nb_cars = length(s.cars)
     resize!(sp.cars, nb_cars)
+    #sp.x = 0
     sp.terminal = s.terminal
 
     ## Calculate deltas ##
     #====================#
 
-    dxs = Array(Float64, nb_cars)
-    dvs = Array(Float64, nb_cars)
-    dys = Array(Float64, nb_cars)
-    lcs = Array(Float64, nb_cars)
+
+
+    dxs = Array{Float64}(nb_cars)
+    dvs = Array{Float64}(nb_cars)
+    dys = Array{Float64}(nb_cars)
+    lcs = Array{Float64}(nb_cars)
 
     # agent
     dvs[1] = a.acc*dt
@@ -332,7 +575,7 @@ function generate_s(mdp::NoCrashProblem, s::MLState, a::MLAction, rng::AbstractR
                     ixp = car_i.x + dt*(car_i.vel + ivp)/2.0
                     jxp = car_j.x + dt*(car_j.vel + jvp)/2.0
                     n_max_acc_p = nullable_max_safe_acc(ixp-jxp-pp.l_car, jvp, ivp, pp.brake_limit,dt)
-                    if ixp - jxp <= pp.l_car || car_i.x - car_j.x <= pp.l_car || isnull(n_max_acc_p) || get(n_max_acc_p) < -pp.brake_limit
+                    if ixp - jxp <= pp.l_car*0.2 || car_i.x - car_j.x <= pp.l_car*0.2 # || isnull(n_max_acc_p) || get(n_max_acc_p) < -pp.brake_limit
 
                         # check if they are moving towards each other
                         # if dys[i]*dys[j] < 0.0 && abs(car_i.y+dys[i] - car_j.y+dys[j]) < 2.0
@@ -366,21 +609,23 @@ function generate_s(mdp::NoCrashProblem, s::MLState, a::MLAction, rng::AbstractR
 
             # check if they overlap longitudinally
             if car_j.x + dxs[j] > car_i.x + dxs[i] - pp.l_car
-            
+
                 # check if they will be in the same lane
                 if occupation_overlap(car_i.y + dys[i], car_j.y + dys[j])
                     # warn and nudge behind
+                    #=
                     @if_debug begin
                         println("Conflict because of noise: front:$i, back:$j")
                         Gallium.@enter generate_s(mdp, s, a, dbg_rng)
                     end
                     if i == 1
                         # warn("Car nudged because noise would cause a crash (ego in front).")
-                        error("Car nudged because noise would cause a crash (ego in front).")
+                        #error("Car nudged because noise would cause a crash (ego in front).")
                     else
                         # warn("Car nudged because noise would cause a crash.")
-                        error("Car nudged because noise would cause a crash.")
+                        #error("Car nudged because noise would cause a crash.")
                     end
+                    =#
                     dxs[j] = car_i.x + dxs[i] - car_j.x - 1.01*pp.l_car
                     dvs[j] = 2.0*(dxs[j]/dt - car_j.vel)
                 end
@@ -426,6 +671,8 @@ function generate_s(mdp::NoCrashProblem, s::MLState, a::MLAction, rng::AbstractR
         #     println("s = $s")
         #     println("a = $a")
         # end
+        #print("yp")
+        #println(yp)
         @assert yp >= 1.0 && yp <= pp.nb_lanes
 
         if xp < 0.0 || xp >= pp.lane_length
@@ -448,11 +695,11 @@ function generate_s(mdp::NoCrashProblem, s::MLState, a::MLAction, rng::AbstractR
         behavior = rand(rng, mdp.dmodel.behaviors)
         vel = typical_velocity(behavior) + randn(rng)*mdp.dmodel.vel_sigma
 
-        clearances = Array(Float64, pp.nb_lanes)
+        clearances = Array{Float64}(pp.nb_lanes)
         fill!(clearances, Inf)
-        closest_cars = Array(Int, pp.nb_lanes)
+        closest_cars = Array{Int}(pp.nb_lanes)
         fill!(closest_cars, 0)
-        sstar_margins = Array(Float64, pp.nb_lanes)
+        sstar_margins = Array{Float64}(pp.nb_lanes)
         if vel > s.cars[1].vel
             # put at back
             # sstar is the sstar of the new guy
@@ -504,7 +751,7 @@ function generate_s(mdp::NoCrashProblem, s::MLState, a::MLAction, rng::AbstractR
         end
 
         margin, lane = findmax(sstar_margins)
-        
+
         if margin > 0.0
             if vel > s.cars[1].vel
                 # at back
@@ -525,13 +772,254 @@ function generate_s(mdp::NoCrashProblem, s::MLState, a::MLAction, rng::AbstractR
     # sp.crashed = false
 
     @assert sp.cars[1].x == s.cars[1].x # ego should not move
+    sp.x = s.x + sp.cars[1].vel*0.75
+    #ca = control_action_adapt(mdp,s)
+    ca = control_action_emergency(mdp,s,false)
+#=
+    if s.Control_Signal && (a == ca)
+       sp.Control_Signal = true
+    else
+       sp.Control_Signal = false
+    end
+=#
 
+    if a == ca && isinteger(sp.cars[1].y)
+        sp.Control_Signal = true
+    else
+        sp.Control_Signal = false
+    end
+
+    if Detect_RSS_Braking(mdp,s)
+        sp.t = 1
+    else
+        sp.t = 0
+    end
+
+#=
+    if s.x > 2500 && isinteger(s.cars[1].y) && s.t == 0.0
+        sp.Control_Signal = true
+        sp.t = 1.0
+    end
+=#
+
+    #if s.cars[1].y == 4.0 && s.t == 0.0
+    #    sp.Control_Signal = true
+    #    sp.t = 1.0
+    #end
     return sp
 end
 
-function reward(mdp::NoCrashProblem{NoCrashRewardModel}, s::MLState, ::MLAction, sp::MLState)
+
+function control_action(mdp::NoCrashProblem, s::Union{MLState, MLPhysicalState})
+     vel = s.cars[1].vel
+     acc = 0.0
+     if vel < 26
+         acc = 0.5
+     end
+     if vel > 27
+         acc = -0.5
+     end
+
+     if acc >= max_safe_acc(mdp, s, 0.0)
+         acc = max_safe_acc(mdp, s, 0.0)-0.1
+     end
+     lc = 0.0
+     if is_safe(mdp,s,MLAction(acc,-mdp.dmodel.lane_change_rate)) && (s.cars[1].y != 1.0) && (s.x>500) && (s.x<2500)
+         lc = -mdp.dmodel.lane_change_rate
+     end
+#=
+     if is_safe(mdp,s,MLAction(acc,mdp.dmodel.lane_change_rate)) && (s.cars[1].y > 3.2) && (s.x>1200) && (s.x<2500)
+         lc = -mdp.dmodel.lane_change_rate
+     end
+     if is_safe(mdp,s,MLAction(acc,mdp.dmodel.lane_change_rate)) && (s.cars[1].y > 2.2) && (s.x>2000) && (s.x<2500)
+         lc = -mdp.dmodel.lane_change_rate
+     end
+     if is_safe(mdp,s,MLAction(acc,mdp.dmodel.lane_change_rate)) && (s.cars[1].y > 1.2) && (s.x>2250) && (s.x<2500)
+         lc = -mdp.dmodel.lane_change_rate
+     end
+=#
+     return MLAction(acc,lc)
+end
+
+
+function control_action_adapt2(mdp::NoCrashProblem, s::Union{MLState, MLPhysicalState})
+     vel = s.cars[1].vel
+     acc = 0.0
+     if vel < 27
+         acc = 0.5
+     end
+     if vel > 28
+         acc = -0.5
+     end
+     if acc >= max_safe_acc(mdp, s, 0.0)
+         acc = max_safe_acc(mdp, s, 0.0)-0.1
+     end
+     lc = 0.0
+     if (s.cars[1].y != 1.0) && (s.x>1500) && (s.x<2500)
+         if is_safe(mdp,s,MLAction(acc,-mdp.dmodel.lane_change_rate))
+            lc = -mdp.dmodel.lane_change_rate
+        elseif vel>22.3 && vel<31
+           acc = -0.5
+         end
+     end
+     return MLAction(acc,lc)
+end
+
+
+function control_action_adapt(mdp::NoCrashProblem, s::Union{MLState, MLPhysicalState})
+     vel = s.cars[1].vel
+     acc = 0.0
+     if vel < 30
+         acc = 0.5
+     end
+     if vel > 31
+         acc = -0.5
+     end
+     if acc >= max_safe_acc(mdp, s, 0.0)
+         acc = max_safe_acc(mdp, s, 0.0)-0.1
+     end
+     lc = 0.0
+     pp = mdp.dmodel.phys_param
+     neighborhood = get_neighborhood(pp, s, 1)
+     PID_acc = get_PID_lane_change_acc(mdp,s)
+     if (s.cars[1].y != 1.0) && (s.x>1500) && (s.x<2500)
+
+         if is_safe(mdp,s,MLAction(acc,-mdp.dmodel.lane_change_rate))
+            lc = -mdp.dmodel.lane_change_rate
+        elseif  PID_acc < max_safe_acc(mdp, s, -mdp.dmodel.lane_change_rate) && vel<33
+            acc = PID_acc
+        #elseif  max_safe_acc(mdp, s, -mdp.dmodel.lane_change_rate) < 0.5 && max_safe_acc(mdp, s, 0.0)>0.5 && vel<33
+    #        acc = -0.5
+    #    elseif (neighborhood[1] !=0) && (neighborhood[4] != 0)
+        elseif vel>22.3
+            acc = -2
+         end
+     end
+     return MLAction(acc,lc)
+end
+
+
+function control_action_emergency(mdp::NoCrashProblem, s::Union{MLState, MLPhysicalState}, RSS_signal::Bool)
+     vel = s.cars[1].vel
+     acc = 0.0
+     des_vel = 19.5
+     acc = (des_vel-vel)
+     if acc>1.5
+         acc = 1.5
+     end
+     if acc<-1.5
+         acc = -1.5
+     end
+##########################
+     dt = mdp.dmodel.phys_param.dt
+     v_min = mdp.dmodel.phys_param.v_min
+     l_car = mdp.dmodel.phys_param.l_car
+     bp = mdp.dmodel.phys_param.brake_limit
+     ego = s.cars[1]
+
+     pp = mdp.dmodel.phys_param
+     neighborhood = get_neighborhood(pp, s, 1)
+
+     car_in_front = neighborhood[2]
+
+     if car_in_front > 0
+         smallest_gap = s.cars[car_in_front].x - ego.x - l_car
+         #de_acc = Gipps_acc(smallest_gap, ego.vel, s.cars[car_in_front].vel, bp, dt)
+         de_acc = Human_like_acc(smallest_gap, ego.vel, s.cars[car_in_front].vel, bp, dt)
+         #RSS_acc = RSS_dis_acc(smallest_gap, ego.vel, s.cars[car_in_front].vel, bp, dt)
+         g_AEB = AEB_acc(smallest_gap, ego.vel, s.cars[car_in_front].vel, bp, dt)
+#=
+         if RSS_signal && RSS_acc < de_acc
+             de_acc = RSS_acc
+         end
+=#
+         if RSS_signal && g_AEB < de_acc
+             de_acc = g_AEB
+         end
+
+
+         if de_acc < acc
+             acc = de_acc
+         end
+     end
+
+
+
+     if acc<-4
+         acc = -4
+     end
+
+
+##################################
+
+     lc = 0.0
+#=
+     if is_safe(mdp,s,MLAction(acc,-mdp.dmodel.lane_change_rate)) && (s.cars[1].y >2.2)
+         lc = -mdp.dmodel.lane_change_rate
+     end
+
+     if is_safe(mdp,s,MLAction(acc,mdp.dmodel.lane_change_rate)) && (s.cars[1].y <1.8)
+         lc = mdp.dmodel.lane_change_rate
+     end
+=#
+     return MLAction(acc,lc)
+end
+
+function control_action_emergency(mdp::NoCrashProblem, s::Union{MLState, MLPhysicalState})
+    return control_action_emergency(mdp,s,false)
+end
+
+function reward(mdp::NoCrashProblem{NoCrashRewardModel}, s::MLState, a::MLAction, sp::MLState)
     r = 0.0
+#=
     if sp.cars[1].y == mdp.rmodel.target_lane
+        r += mdp.rmodel.reward_in_target_lane
+    end
+
+###############################################
+
+    if sp.cars[1].vel < 20
+        r -= 10*(20-sp.cars[1].vel)
+    end
+
+    if s.Control_Signal
+        r += mdp.rmodel.reward_for_control
+    end
+
+    if (s.x > mdp.rmodel.target_point) && (sp.cars[1].y != mdp.rmodel.target_lane)
+           r -= mdp.rmodel.reward_in_first_lane*10
+    end
+
+    if (s.x > mdp.rmodel.target_point) && (sp.cars[1].y == mdp.rmodel.target_lane)
+           r += mdp.rmodel.reward_in_first_lane
+    end
+#################################################
+
+=#
+
+###############################
+    if s.Control_Signal
+        r += 0
+    else
+        r -= mdp.rmodel.reward_for_control
+    end
+
+    if judge_collision(mdp,s)
+        r -=mdp.rmodel.reward_for_collision
+    end
+
+    if a.acc < -mdp.rmodel.brake_penalty_thresh
+        r -= mdp.rmodel.cost_dangerous_brake
+    end
+###############################
+
+
+    return r
+end
+
+function reward(mdp::NoCrashProblem{RampRewardModel}, s::MLState, ::MLAction, sp::MLState)
+    r = 0.0
+    if sp.cars[1].y == mdp.rmodel.first_lane
         r += mdp.rmodel.reward_in_target_lane
     end
     nb_brakes = detect_braking(mdp, s, sp)
@@ -539,12 +1027,15 @@ function reward(mdp::NoCrashProblem{NoCrashRewardModel}, s::MLState, ::MLAction,
     return r
 end
 
+
+
+
 """
 Return the number of braking actions that occured during this state transition
 """
 function detect_braking(mdp::NoCrashProblem, s::MLState, sp::MLState, threshold::Float64)
     nb_brakes = 0
-    nb_leaving = 0 
+    nb_leaving = 0
     dt = mdp.dmodel.phys_param.dt
     for (i,c) in enumerate(s.cars)
         if length(sp.cars) >= i-nb_leaving
@@ -574,7 +1065,7 @@ Return the ids of cars that brake during this state transition
 """
 function braking_ids(mdp::NoCrashProblem, s::MLState, sp::MLState, threshold=mdp.rmodel.brake_penalty_thresh)
     braking = Int[]
-    nb_leaving = 0 
+    nb_leaving = 0
     dt = mdp.dmodel.phys_param.dt
     for (i,c) in enumerate(s.cars)
         if length(sp.cars) >= i-nb_leaving
@@ -600,7 +1091,7 @@ end
 Return the maximum braking (a positive number) by any car during the transition between s an sp
 """
 function max_braking(mdp::NoCrashProblem, s::MLState, sp::MLState)
-    nb_leaving = 0 
+    nb_leaving = 0
     dt = mdp.dmodel.phys_param.dt
     min_acc = 0.0
     for (i,c) in enumerate(s.cars)

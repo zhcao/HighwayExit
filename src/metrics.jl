@@ -1,4 +1,4 @@
-abstract SimMetric # functions: key(m), datatype(m), calculate(m, mdp, sim)
+abstract type SimMetric end # functions: key(m), datatype(m), calculate(m, mdp, sim)
 
 type MaxBrakeMetric <: SimMetric end
 key(::MaxBrakeMetric) = :max_brake
@@ -26,7 +26,7 @@ function calculate(m::NumBehaviorBrakesMetric, problem::NoCrashProblem, sim::His
     sh = sim.state_hist
     nb_brakes = 0
     for i in 1:length(sh)-1
-        nb_leaving = 0 
+        nb_leaving = 0
         dt = problem.dmodel.phys_param.dt
         s = sh[i]
         sp = sh[i+1]
@@ -42,7 +42,7 @@ function calculate(m::NumBehaviorBrakesMetric, problem::NoCrashProblem, sim::His
             else
                 if c.behavior.idx == m.idx
                     acc = (cp.vel-c.vel)/dt
-                    if acc < -m.threshold 
+                    if acc < -m.threshold
                         nb_brakes+=1
                     end
                 end

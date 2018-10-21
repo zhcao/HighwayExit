@@ -8,8 +8,8 @@ import POMDPs: actions, discount, isterminal, iterator
 import POMDPs: rand, reward
 import POMDPs: solve, action
 import POMDPs: update, initialize_belief
-using GenerativeModels
-import GenerativeModels: generate_s, generate_sr, initial_state, generate_o, generate_sor
+#using GenerativeModels
+#import GenerativeModels: generate_s, generate_sr, initial_state, generate_o, generate_sor
 
 import Distributions: Dirichlet, Exponential, Gamma, rand
 
@@ -20,12 +20,16 @@ import Base: ==, hash, length, vec, +, -, *, .*, ^, .^, .-, /, sqrt, zero, abs, 
 # import POMDPToolbox: Particle, ParticleBelief
 
 using DataFrames
+using DataArrays
 using ProgressMeter
 using PmapProgressMeter
 using POMDPToolbox
+using ParticleFilters
+
 import MCTS # so that we can define node_tag, etc.
 # using RobustMCTS # for RobustMDP
-import POMCP # for particle filter
+import BasicPOMCP # for particle filter
+
 
 # using Reel
 # using AutomotiveDrivingModels
@@ -144,7 +148,31 @@ export
     GaussianCopula
 
 export
-    include_visualization
+    include_visualization,
+    #generate_sr,
+    create_state,
+    NoCrashProblem,
+
+
+    HardBrakeOverlay,
+    InfoOverlay,
+    CarIDOverlay,
+    CarVelOverlay,
+    gen_initials_cz,
+    relaxed_initial_state_cz,
+    relaxed_initial_state_cz2,
+    test_run_cz,
+    simulate_cz,
+    MLMPCAgent,
+    BehaviorGenerator,
+    standard_uniform,
+    relaxed_initial_state_TRI,
+    relaxed_initial_state_cz_control,
+    get_traffic_density,
+    relaxed_initial_state_cz_emergency,
+    EmergencyRewardModel,
+    judge_collision
+
 
 include("triangular.jl")
 include("physical.jl")
@@ -157,6 +185,7 @@ include("copula.jl")
 include("behavior_gen.jl")
 include("success_model.jl")
 include("no_crash_model.jl")
+
 include("metrics.jl")
 include("evaluation.jl")
 include("test_sets.jl")
@@ -165,16 +194,25 @@ include("robust_mdp.jl")
 include("pomdp_glue.jl")
 include("most_likely_mpc.jl")
 include("single_behavior.jl")
+
+#include("heuristics.jl")
+
+
+
 include("beliefs.jl")
 include("aggressiveness_particle_filter.jl")
+include("Traffic_Simulation_TRI.jl")
+#=
 include("uniform_particle_filter.jl")
 include("heuristics.jl")
 include("tree_vis.jl")
 include("sherlock.jl")
-
+=#
 include_visualization() = include(joinpath(Pkg.dir("Multilane"),"src","visualization.jl"))
 
-if gethostname() == "Theresa"
+#if gethostname() == "Theresa"
+kkkk = 1
+if kkkk == 1
     println("Automatically loading visualization components.")
     include("visualization.jl")
     export
@@ -183,7 +221,8 @@ if gethostname() == "Theresa"
         show_sim,
         display_sim,
         save_frame,
-        visualize
+        visualize,
+        visualize_cz
 end
 
 end # module

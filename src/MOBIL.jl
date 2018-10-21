@@ -72,7 +72,7 @@ function get_neighborhood(pp::PhysicalParam,s::Union{MLState,MLObs},idx::Int)
 	5    |car|   2 ->
 	4      |     1
 	where 1/2/3 is the front, 3/6 is left
-    
+
     Note: The same car can occupy two spots if the vehicle is changing lanes.
 	"""
 
@@ -139,7 +139,7 @@ function get_dv_ds(pp::PhysicalParam,s::MLState,nbhd::Array{Int,1},idx::Int,idy:
 end
 
 """
-Return two numbers first if the lane change is made, second if the lane change is not made 
+Return two numbers first if the lane change is made, second if the lane change is not made
 
 (I think) - Zach (7/13/16)
 """
@@ -192,7 +192,6 @@ function get_mobil_lane_change(behavior, pp::PhysicalParam,s::MLState,nbhd::Arra
 	if sum(nbhd) == 0
 		return 0. #no reason to change lanes if you're all alone
 	end
-
 	##if between lanes, return +1 if moving left, -1 if moving right
 	if !isinteger(state.y)
 		return state.lane_change #continue going in the direction you're going
@@ -237,7 +236,15 @@ function get_mobil_lane_change(behavior, pp::PhysicalParam,s::MLState,nbhd::Arra
     end
 
 	#check incentive criterion
+	#if max(left_crit,right_crit) > p_mobil.a_thr
+    #=
+	if max(abs(left_crit),abs(right_crit)) > p_mobil.a_thr
+        println("LCMOBIL")
+		return float(dir_flag)
+	end
+    =#
 	if max(left_crit,right_crit) > p_mobil.a_thr
+		#println("LCMOBIL")
 		return float(dir_flag)
 	end
 	return 0.

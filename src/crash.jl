@@ -76,6 +76,7 @@ function poly_intersect(X::Array{Array{Float64,2},1},Y::Array{Array{Float64,2},1
 	end
 
 	#check if one is inside the other
+
 	max1 = max(X[1][:,1],X[1][:,2])
 	min1 = min(X[1][:,1],X[1][:,2])
 	max2 = max(Y[1][:,1],Y[1][:,2])
@@ -88,7 +89,20 @@ function poly_intersect(X::Array{Array{Float64,2},1},Y::Array{Array{Float64,2},1
 		max2 = max(max2,max(Y[i][:,1],Y[i][:,2]))
 		min2 = min(min2,min(Y[i][:,1],Y[i][:,2]))
 	end
-
+    #=
+	max1 = max.(X[1,1],X[1,2])
+	min1 = min.(X[1,1],X[1,2])
+	max2 = max.(Y[1,1],Y[1,2])
+	min2 = min.(Y[1,1],Y[1,2])
+	for i = 2:length(X)
+		max1 = max(max1,max.(X[i,1],X[i,2]))
+		min1 = min(min1,min.(X[i,1],X[i,2]))
+	end
+	for i = 2:length(Y)
+		max2 = max(max2,max.(Y[i,1],Y[i,2]))
+		min2 = min(min2,min.(Y[i,1],Y[i,2]))
+	end
+    =#
 	#Case: X is contained in Y
 	if !(false in (max1 .< max2)) && !(false in (min1 .> min2))
 		return true

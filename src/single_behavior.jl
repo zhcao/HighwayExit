@@ -5,16 +5,24 @@ type SingleBehaviorSolver <: Solver
     behavior::BehaviorModel
 end
 
-type SingleBehaviorPolicy <: Policy{MLState}
-    inner_policy::Policy{MLState}
+abstract type Policy{MLState} end
+struct SingleBehaviorPolicy{Policy,BehaviorModel} #<: Policy{MLState}
+    inner_policy::Policy
     behavior::BehaviorModel
 end
+
+#
+#type SingleBehaviorPolicy <: Policy{MLState}
+#    inner_policy::Policy{MLState}
+#    behavior::BehaviorModel
+#end
+
 
 set_rng!(solver::SingleBehaviorSolver, rng::AbstractRNG) = set_rng!(solver.inner_solver, rng)
 
 function solve(solver::SingleBehaviorSolver, mdp::NoCrashProblem)
     single_behavior_mdp = deepcopy(mdp)
-    single_behavior_mdp.dmodel.behaviors = DiscreteBehaviorSet(BehaviorModel[solver.behavior], WeightVec([1.0]))
+    single_behavior_mdp.dmodel.behaviors = DiscreteBehaviorSet(BehaviorModel[solver.behavior], Weights([1.0]))
 
     inner_policy = solve(solver.inner_solver, single_behavior_mdp)
     return SingleBehaviorPolicy(inner_policy, solver.behavior)

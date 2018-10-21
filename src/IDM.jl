@@ -36,6 +36,13 @@ end
 function get_idm_dv(p::IDMParam,dt::Float64,v::Float64,dv::Float64,s::Float64)
 	s_ = get_idm_s_star(p, v, dv)
     dvdt = p.a*(1.-(v/p.v0)^p.del - (s_/s)^2)
+  if (dvdt) > 1.01*p.a
+	  print(p.a)
+	  print(" || ")
+	  print((v/p.v0)^p.del)
+	  print(" || ")
+	  println(dvdt)
+  end
 	#dvdt = min(max(dvdt,-p.b),p.a)
 	return (dvdt*dt)::Float64
 end #get_idm_dv
@@ -75,4 +82,3 @@ function IDMParam(s::AbstractString,v0::Float64,s0::Float64)
 		error("No such idm phenotype: \"$(s)\"")
 	end
 end
-

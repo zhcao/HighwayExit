@@ -84,11 +84,51 @@ function visualize(mdp::Union{MLMDP,MLPOMDP}, s::MLState, a::MLAction, sp::MLSta
 
     scene = Scene()
     for cs in s.cars
-        push!(scene, Vehicle(VehicleState(VecSE2(cs.x, (cs.y-1.0)*pp.w_lane, 0.0), roadway, cs.vel), 
-                                VehicleDef(cs.id, AgentClass.CAR, pp.l_car, pp.w_car)))
+        push!(scene, Vehicle(VehicleState(VecSE2(cs.x, (cs.y-1.0)*pp.w_lane, 0.0), roadway, cs.vel),
+                                #VehicleDef(cs.id, AgentClass.CAR, pp.l_car, pp.w_car)))
+                                VehicleDef(AgentClass.CAR, pp.l_car, pp.w_car),cs.id))
     end
-    render(scene, roadway, [hbol, iol, cidol, cvol], cam=FitToContentCamera())
+
+    #render(scene, roadway, [hbol, iol, cidol, cvol], cam=FitToContentCamera())
+
+    render(scene, roadway, cam=FitToContentCamera())
+    print("Visualize Check")
+
+#    return scene
 end
+
+
+function visualize_cz(mdp::Union{MLMDP,MLPOMDP}, s::MLState, a::MLAction, sp::MLState;
+                   idx::Nullable{Int}=Nullable{Int}())
+    pp = mdp.dmodel.phys_param
+    roadway = gen_straight_roadway(pp.nb_lanes,
+                                   pp.lane_length,
+                                   lane_width=pp.w_lane)
+
+    hbol = HardBrakeOverlay(pp, braking_ids(mdp, s, sp))
+    iol = InfoOverlay(pp, idx,
+                      s.cars[1].vel,
+                      max_braking(mdp, s, sp),
+                      is_crash(mdp, s, sp))
+    cidol = CarIDOverlay()
+    cvol = CarVelOverlay()
+
+    scene = Scene()
+    #for cs in s.cars
+    #    push!(scene, Vehicle(VehicleState(VecSE2(cs.x, (cs.y-1.0)*pp.w_lane, 0.0), roadway, cs.vel),
+                                #VehicleDef(cs.id, AgentClass.CAR, pp.l_car, pp.w_car)))
+    #                            VehicleDef(AgentClass.CAR, pp.l_car, pp.w_car),cs.id))
+    #end
+
+    #render(scene, roadway, [hbol, iol, cidol, cvol], cam=FitToContentCamera())
+
+    #render(scene, roadway, cam=FitToContentCamera())
+    #return scene
+    print("CZ Visualize Check")
+    return scene
+end
+
+
 
 visualize(mdp::Union{MLMDP,MLPOMDP}, s::MLState) = visualize(mdp.dmodel.phys_param, s)
 
@@ -98,7 +138,7 @@ function visualize(pp::PhysicalParam, s::MLState)
                                    lane_width=pp.w_lane)
     scene = Scene()
     for cs in s.cars
-        push!(scene, Vehicle(VehicleState(VecSE2(cs.x, (cs.y-1.0)*pp.w_lane, 0.0), roadway, cs.vel), 
+        push!(scene, Vehicle(VehicleState(VecSE2(cs.x, (cs.y-1.0)*pp.w_lane, 0.0), roadway, cs.vel),
                                 VehicleDef(cs.id, AgentClass.CAR, pp.l_car, pp.w_car)))
     end
     render(scene, roadway, [CarIDOverlay(), CarVelOverlay()], cam=FitToContentCamera())

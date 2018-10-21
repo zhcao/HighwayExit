@@ -6,7 +6,7 @@ const PP = PhysicalParam(4)
 #                     IDMMOBILBehavior("cautious", PP.v_slow+0.5, PP.l_car, 2),
 #                     IDMMOBILBehavior("aggressive", PP.v_fast, PP.l_car, 3)
 #                     ]
-# 
+#
 # const NINE_BEHAVIORS = IDMMOBILBehavior[IDMMOBILBehavior(x[1],x[2],x[3],idx) for (idx,x) in
 #                                                  enumerate(Iterators.product(["cautious","normal","aggressive"],
 #                                                         [PP.v_slow+0.5;PP.v_med;PP.v_fast],
@@ -27,7 +27,7 @@ const AGGRESSIVE = agents_behavior(AGGRESSIVE_IDM, 3)
 function generate_nine_behaviors()
     bs = IDMMOBILBehavior[]
     velocities = [120/3.6, 100/3.6, 140/3.6]
-    for (i,v) in enumerate(velocities) 
+    for (i,v) in enumerate(velocities)
         push!(bs, agents_behavior(IDMParam(1.4, 2.0, 1.5, v, 2.0, 4.0), 1+(i-1)*3))
         push!(bs, agents_behavior(IDMParam(1.0, 1.0, 1.8, v, 4.0, 4.0), 2+(i-1)*3))
         push!(bs, agents_behavior(IDMParam(2.0, 3.0, 1.0, v, 1.0, 4.0), 3+(i-1)*3))
@@ -40,8 +40,8 @@ const NINE_BEHAVIORS = generate_nine_behaviors()
 const DEFAULT_BEHAVIORS = Dict{String, Any}(
     # "3_even" => DiscreteBehaviorSet(THREE_BEHAVIORS, WeightVec(ones(3))),
     # "9_even" => DiscreteBehaviorSet(NINE_BEHAVIORS, WeightVec(ones(9))),
-    "agents" => DiscreteBehaviorSet([NORMAL, TIMID, AGGRESSIVE], WeightVec(ones(3))),
-    "9_agents" => DiscreteBehaviorSet(NINE_BEHAVIORS, WeightVec(ones(3)))
+    "agents" => DiscreteBehaviorSet([NORMAL, TIMID, AGGRESSIVE], Weights(ones(3))),
+    "9_agents" => DiscreteBehaviorSet(NINE_BEHAVIORS, Weights(ones(3)))
 )
 
 const DEFAULT_PROBLEM_PARAMS = Dict{Symbol, Any}( #NOTE VALUES ARE NOT VECTORS like in linked
@@ -79,7 +79,7 @@ The keyword arguments should be either
     2) problem parameters.
 
 If the the argument in is a problem parameter, if it begins with "solver_", it
-will only be applied to the problem given to the solver, otherwise it will be 
+will only be applied to the problem given to the solver, otherwise it will be
 applied to both problems. The arguments will be applied in order, so solver_
 parameter values should come later.
 """
@@ -149,7 +149,8 @@ end
 
 function gen_initials(tests::AbstractVector, initials::Dict=Dict{String,Any}();
                       behaviors::Dict{String,Any}=get(initials, "behaviors", DEFAULT_BEHAVIORS),
-                      generate_physical=false,
+                      #generate_physical=false,
+                      generate_physical=true,
                       rng::AbstractRNG=MersenneTwister(rand(UInt32)))
     initials=Dict{String,Any}(k=>v for (k,v) in initials)
     for t in tests
@@ -158,7 +159,21 @@ function gen_initials(tests::AbstractVector, initials::Dict=Dict{String,Any}();
     return initials
 end
 
-function gen_dmodel(row, behaviors::BehaviorGenerator) 
+function gen_initials_cz(tests::TestSet, initials::Dict=Dict{String,Any}();
+                      behaviors::Dict{String,Any}=get(initials, "behaviors", DEFAULT_BEHAVIORS),
+                      generate_physical=true,
+                      #generate_physical=false,
+                      rng::AbstractRNG=MersenneTwister(rand(UInt32)))
+    initials=Dict{String,Any}(k=>v for (k,v) in initials)
+    #for t in tests
+    print("begin ini")
+    add_initials!(initials, tests, behaviors=behaviors, rng=rng, generate_physical=generate_physical)
+    #end
+    print("end ini")
+    return initials
+end
+
+function gen_dmodel(row, behaviors::BehaviorGenerator)
     nb_lanes = 4
     nb_cars = 10
     pp = PhysicalParam(nb_lanes,lane_length=100.)
@@ -178,10 +193,11 @@ function gen_dmodel(row, behaviors::BehaviorGenerator)
     # brake_terminate_thresh
     dmodel.brake_terminate_thresh = row[:brake_terminate_thresh]
 
-    return dmodel 
+    return dmodel
 end
 
 function gen_rmodel(row)
+#=
     if Symbol(row[:rmodel_type]) == :TargetLaneReward
         return TargetLaneReward(row[:target_lane])
     elseif Symbol(row[:rmodel_type]) == :NoCrashRewardModel
@@ -190,6 +206,13 @@ function gen_rmodel(row)
         rmodel.cost_dangerous_brake = row[:lambda]*rmodel.reward_in_target_lane
         rmodel.brake_penalty_thresh = row[:brake_threshold]
     end
+=#
+########I changed the Rmodel
+    target_lane_reward = 10.
+    rmodel = NoCrashRewardModel(target_lane_reward*10., target_lane_reward,2.5,row[:target_lane])
+    rmodel.cost_dangerous_brake = row[:lambda]*rmodel.reward_in_target_lane
+    rmodel.brake_penalty_thresh = row[:brake_threshold]
+    return rmodel
 end
 
 function gen_problem(row, behaviors::Dict{String,Any})
@@ -209,6 +232,7 @@ function add_initials!(objects::Dict{String, Any},
                        behaviors::Dict{String,Any}=get(objects, "behaviors"),
                        rng::AbstractRNG=MersenneTwister(rand(UInt32)),
                        generate_physical=false)
+                       #generate_physical=true)
 
     new_table = DataFrame()
 
@@ -219,7 +243,7 @@ function add_initials!(objects::Dict{String, Any},
             new_table = join(new_table, DataFrame(Dict(p)), kind=:cross)
         end
     end
-    
+
     # run through and check to see if all are the same
     different = false
     for (k,v) in ts.problem_params
@@ -243,6 +267,7 @@ function add_initials!(objects::Dict{String, Any},
         new_table = join(new_table, specific_table, kind=:cross)
     end
     param_list = names(new_table)
+
 
     problems = get(objects, "problems", Dict{String,Any}())
     if haskey(objects, "param_table")
@@ -273,6 +298,7 @@ function add_initials!(objects::Dict{String, Any},
     initial_states = get(objects, "initial_states", Dict{String,Any}())
     state_lists = get(objects, "state_lists", Dict{String,Any}())
 
+
     if haskey(objects, "initial_physical_states")
         initial_physical_states = objects["initial_physical_states"]
     elseif generate_physical
@@ -284,7 +310,7 @@ function add_initials!(objects::Dict{String, Any},
     else
         error("""No initial physical states found!""")
     end
-
+     print("check st")
     for g in groupby(param_table, INITIAL_RELEVANT)
         if isna(first(g[:state_list_key]))
             key = randstring(rng)
@@ -296,7 +322,7 @@ function add_initials!(objects::Dict{String, Any},
             state_lists[key] = collect(keys(these_states))
         end
     end
-    
+    print("check en")
     objects["param_table"] = param_table
     objects["problems"] = problems
     objects["state_lists"] = state_lists
@@ -345,7 +371,7 @@ function setup_stats(tests::AbstractVector, objects::Dict{String,Any})
         test_key = t.key
         solver_key = t.solver_key
         for i in 1:t.nb_problems
-            # find the row  
+            # find the row
             d = Dict{Symbol, Any}()
             solver_d = Dict{Symbol, Any}()
             for (k,v) in t.problem_params

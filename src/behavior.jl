@@ -44,23 +44,31 @@ function accel_dist(bmodel::IDMMOBILBehavior, dmodel::AbstractMLDynamicsModel, s
 	dt = pp.dt
 	car = s.cars[idx]
 	vel = car.vel
-    
+
 	dv, ds = get_dv_ds(pp,s,neighborhood,idx,2)
 
 	dvel = get_idm_dv(bmodel.p_idm,dt,vel,dv,ds) #call idm model
     acc = dvel/dt
-
+#=
+    if acc > (1.01*bmodel.p_idm.a)
+      print(acc)
+	  print(" || ")
+	  println(bmodel.p_idm.a)
+	  warn("acc is bigger than the settle value")
+	end
+=#
     @assert acc <= 1.01*bmodel.p_idm.a
 
     @if_debug if ds < 0.0
         Gallium.@enter accel_dist(bmodel, dmodel, s, neighborhood, idx)
     end
-    @assert ds >= 0.0 # can get rid of this
+    #@assert ds >= 0.0 # can get rid of this
     if neighborhood[2] > 0
         @assert abs(s.cars[neighborhood[2]].vel - (vel-dv)) < 0.0001
     end
 
     max_safe = max_safe_acc(ds, vel, vel-dv, pp.brake_limit, dt)
+	#max_safe = nullable_max_safe_acc(ds, vel, vel-dv, pp.brake_limit, dt)
 
     # if T, a, and b are small the idm may command something faster than the max_safe
     # @assert max_safe >= acc "max_safe=$max_safe; acc=$acc"
@@ -71,6 +79,18 @@ function accel_dist(bmodel::IDMMOBILBehavior, dmodel::AbstractMLDynamicsModel, s
     lower_bound = min(-1e-5, max(-bmodel.p_idm.a/2, -pp.brake_limit-acc))
     upper_bound = min(bmodel.p_idm.a/2, max(max_safe-acc, 1e-5))
 
+	if lower_bound > upper_bound
+		lower_bound = -0.1
+		upper_bound = 0.1
+	end
+
+	if acc > 8
+		acc = 8
+	end
+	if acc<-8
+		acc = -8
+	end
+	
     return TriangularDist(acc+lower_bound, acc+upper_bound, acc)
 end
 
@@ -79,7 +99,7 @@ function max_accel(bmodel::IDMMOBILBehavior)
 end
 
 function gen_lane_change(bmodel::IDMMOBILBehavior, dmodel::AbstractMLDynamicsModel, s::MLState, neighborhood::Array{Int,1}, idx::Int, rng::AbstractRNG)
-
+    #print("LC2")
 	pp = dmodel.phys_param
 	dt = pp.dt
 	car = s.cars[idx]
@@ -88,6 +108,7 @@ function gen_lane_change(bmodel::IDMMOBILBehavior, dmodel::AbstractMLDynamicsMod
 
 	if mod(lane_-0.5,1) == 0. #in between lanes
         @assert lane_change != 0
+		#println("in")
 		return lane_change
 	end
 
@@ -96,7 +117,7 @@ function gen_lane_change(bmodel::IDMMOBILBehavior, dmodel::AbstractMLDynamicsMod
 	#gives +1, -1 or 0
 
     lanechange = lanechange_
-
+    #println(lanechange * dmodel.lane_change_rate)
 	return lanechange * dmodel.lane_change_rate
 end
 
@@ -172,7 +193,9 @@ end
 
 function gen_lane_change(bmodel::AvoidModel, dmodel::IDMMOBILModel, s::MLState, neighborhood::Array{Int,1}, idx::Int, rng::AbstractRNG)
 
+
 	closest_car = closest_car(dmodel,s,neighborhood,idx,bmodel.jerk)
+    println("L-C1")
 	if closest_car == 0
 		return 0.
 	end

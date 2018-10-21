@@ -14,6 +14,23 @@ function test_run(eval_problem::NoCrashMDP, initial_state::MLState, solver_probl
     return sim
 end
 
+################################
+
+function test_run_cz(eval_problem::NoCrashMDP, solver_problem::NoCrashMDP, rng_seed::Integer, max_steps=100)
+    
+    nb_lanes = 4
+    pp = PhysicalParam(nb_lanes,lane_length=100.)
+    initial_state = MLState(0.0, 0.0, CarState[CarState(pp.lane_length/2, 2.0, pp.v_med, 0.0, NORMAL, 1)])
+    solver = BehaviorSolver(NORMAL, false, MersenneTwister(5))
+    #set_rng!(solver, MersenneTwister(rng_seed))
+    sim = POMDPToolbox.HistoryRecorder(rng=MersenneTwister(rng_seed), max_steps=max_steps, capture_exception=true)
+    terminal_problem = deepcopy(eval_problem)
+    terminal_problem.dmodel.lane_terminate = true
+    r = simulate_cz(sim, terminal_problem, solve(solver,solver_problem), initial_state)
+    return sim
+end
+
+##############################
 function test_run_return_policy(eval_problem::NoCrashMDP, initial_state::MLState, solver_problem::NoCrashMDP, solver::Solver, rng_seed::Integer, max_steps=10000)
     set_rng!(solver, MersenneTwister(rng_seed))
     sim = POMDPToolbox.HistoryRecorder(rng=MersenneTwister(rng_seed), max_steps=max_steps)
@@ -136,8 +153,8 @@ function run_simulations(eval_problems::AbstractVector,
             println("")
         end
     end
-    
-    # return a vector of history recorders 
+
+    # return a vector of history recorders
     return sims
 end
 
@@ -323,3 +340,26 @@ function rerun{S<:AbstractString}(results::Dict{S, Any}, id; enforce_match=true)
     end
     return problem, sim, policy
 end
+
+#=
+function rerun11{S<:AbstractString}(enforce_match=true)
+    #stats = results["stats"]
+#    @assert stats[:id][id] == id
+    problem = eUvEUsEg#results["problems"][stats[:problem_key][id]]
+    is = wbNTilaR#results["initial_states"][stats[:initial_key][id]]
+    solver = random#results["solvers"][stats[:solver_key][id]]
+    solver_problem = #results["problems"][stats[:solver_problem_key][id]]
+    rng_seed = 30#stats[:rng_seed][id]
+    if enforce_match
+        steps = 184#stats[:steps][id]
+    else
+        steps = 10000
+    end
+    sim, policy = test_run_return_policy(problem, is, solver_problem, solver, rng_seed, steps)
+    r = sum([reward(problem, sim.state_hist[i], sim.action_hist[i], sim.state_hist[i+1]) for i in 1:length(sim.action_hist)])
+    if enforce_match
+        @assert r == stats[:reward][id]
+    end
+    return problem, sim, policy
+end
+=#

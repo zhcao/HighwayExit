@@ -1,6 +1,6 @@
 # XXX this is all kind of hacky
 
-type MLPOMDPSolver <: Solver
+struct MLPOMDPSolver <: Solver
     solver
     updater::Nullable{Any}
 end
@@ -9,7 +9,7 @@ function set_rng!(s::MLPOMDPSolver, rng::AbstractRNG)
     set_rng!(get(s.updater), rng)
 end
 
-type MLPOMDPAgent <: Policy
+struct MLPOMDPAgent <: Policy
     updater::Updater
     previous_belief::Nullable{Any}
     policy::Policy
@@ -40,7 +40,7 @@ function action(agent::MLPOMDPAgent, state::MLState)
     return a
 end
 
-type ParticleGenerator
+struct ParticleGenerator
     physical::MLPhysicalState
     behaviors::BehaviorGenerator
 end
@@ -51,8 +51,9 @@ end
 
 function rand(rng::AbstractRNG, gen::ParticleGenerator,
               full_s::MLState=MLState(gen.physical,
-                                      Array(CarState,
-                                            length(gen.physical.cars))))
+                                      Array{CarState}(length(gen.physical.cars))))
+                                      #Array(CarState,
+                                        #    length(gen.physical.cars))))
     s = gen.physical
     resize!(full_s.cars, length(s.cars))
     for i in 1:length(s.cars)
@@ -72,13 +73,13 @@ type BasicMLReinvigorator <: POMCP.ParticleReinvigorator
 end
 
 # ideas for future reinvigorators
-# 1) change behaviors of newer cars more often 
+# 1) change behaviors of newer cars more often
 # 2) change behaviors of cars at the edges of the lanes more often
 # 3) change behaviors of the cars that are furthest from their observations most often
 
 function POMCP.reinvigorate!(pc::ParticleCollection, r::BasicMLReinvigorator, old_node::POMCP.BeliefNode, a, o)
     while length(pc.particles) < r.N
-        new_s = 
+        new_s =
     end
     return pc
 end
